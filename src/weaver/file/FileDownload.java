@@ -248,6 +248,8 @@ public class FileDownload extends HttpServlet {
                     }
                     
                     InputStream imagefile = null;
+                    imageFileManager.getImageFileInfoById(Util.getIntValue(imagefileid));
+                    imagefile=imageFileManager.getInputStream();
                     if("1".equals(gvo_encrypt)&&"1".equals(download)){
 						//
 						StringBuffer log_buff = new StringBuffer();
@@ -258,10 +260,11 @@ public class FileDownload extends HttpServlet {
 						// 加密
 						// boolean isencfile = true;  //false 解密 true 加密
 						imagefile = gsf.getGvoInputStream(log_buff.toString(),imagefile,true);
-					}else {
-                    imageFileManager.getImageFileInfoById(Util.getIntValue(imagefileid));
-                    imagefile=imageFileManager.getInputStream();
-					}
+                    }
+//					}else {
+//                    imageFileManager.getImageFileInfoById(Util.getIntValue(imagefileid));
+//                    imagefile=imageFileManager.getInputStream();
+//					}
                     if(download.equals("1") && (isOfficeToDocument(extName))&&isMsgObjToDocument()) {
                         //正文的处理
                         ByteArrayOutputStream bout = null;
