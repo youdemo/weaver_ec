@@ -130,7 +130,7 @@ public class FileUpload  extends BaseBean
     	this.remoteAddr=Util.getIpAddr(request);
         if (isMultipartData(request)) mpdata = getAttachment(request,iszip,encoding,strDirAddr);
         this.request = request ;
-    }
+    } 
     
 	public Hashtable getUploadImgNames(){
 		String el="",imgpath="",imgname="";
