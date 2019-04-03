@@ -8,22 +8,17 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-
 import net.sf.json.JSONObject;
 
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.httpclient.HttpClient;
 import org.apache.commons.httpclient.HttpStatus;
-import org.apache.commons.httpclient.contrib.ssl.EasySSLProtocolSocketFactory;
 import org.apache.commons.httpclient.cookie.CookiePolicy;
 import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.httpclient.params.HttpMethodParams;
-import org.apache.commons.httpclient.protocol.Protocol;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.lang.math.NumberUtils;
 import org.apache.commons.logging.Log;
@@ -32,8 +27,8 @@ import org.apache.commons.logging.LogFactory;
 import weaver.conn.ConnStatement;
 import weaver.conn.RecordSet;
 import weaver.file.Prop;
+import weaver.general.FWHttpConnectionManager;
 import weaver.general.GCONST;
-import weaver.general.MD5;
 import weaver.general.StaticObj;
 import weaver.general.Util;
 import weaver.hrm.HrmUserVarify;
@@ -41,18 +36,17 @@ import weaver.hrm.User;
 import weaver.hrm.company.DepartmentComInfo;
 import weaver.hrm.company.SubCompanyComInfo;
 import weaver.hrm.resource.ResourceComInfo;
+import weaver.hrm.settings.BirthdayReminder;
 import weaver.hrm.settings.ChgPasswdReminder;
 import weaver.hrm.settings.HrmSettingsComInfo;
 import weaver.hrm.settings.RemindSettings;
 import weaver.proj.util.CodeUtil;
 import weaver.systeminfo.SysMaintenanceLog;
+import weaver.systeminfo.SystemEnv;
 import weaver.systeminfo.setting.HrmUserSettingComInfo;
 
 public class AuthService {
-	static {
-		Protocol.registerProtocol("https", new Protocol("https", new EasySSLProtocolSocketFactory(), 443));
-	}
-	
+
 	private static Log logger = LogFactory.getLog(AuthService.class);
 	
 	HrmResourceService hrs = new HrmResourceService();
@@ -62,7 +56,7 @@ public class AuthService {
 	public Map login(String loginId,String password,String secrect,String loginTokenFromThird,String dynapass,String tokenpass,String language,String ipaddress,int policy,List auths) {
 		
 		Map result = new HashMap();
-
+		boolean isWhite = false;
 		if (loginId != null && !"".equals(loginId) && password != null && !"".equals(password) && ipaddress != null && !"".equals(ipaddress)) {
 			int status = 4;
 			if(loginTokenFromThird != null && !"".equals(loginTokenFromThird)){
@@ -70,9 +64,8 @@ public class AuthService {
 				String tokenfromClient =  CodeUtil.hexSHA1(secrect+loginId+password);
 				
 				if(tokenfromClient.equals(loginTokenFromThird)){
+					ConnStatement statement  = new ConnStatement();
 					try {
-						ConnStatement statement  = new ConnStatement();
-
 						String sql = "select id,password from HrmResource where loginid= ? union select id,password from HrmResourcemanager where loginid= ? ";
 						
 						statement.setStatementSql(sql);
@@ -84,12 +77,39 @@ public class AuthService {
 				        }	
 					} catch(Exception e){
 						e.printStackTrace();
+					} finally{
+						statement.close();
 					}
 				}else{
 					result.put("message", "对不起，您所提供的token不正确！");
 					return result;
 				}
 			}else{
+				
+				//获取白名单参数，是否开启白名单
+				String isopen = Prop.getPropValue("EMobileWhiteList", "WhiteListOpen");
+				if(isopen != null && "true".equals(isopen)){
+					String iplist = Prop.getPropValue("EMobileWhiteList", "ips");
+					if(iplist != null && iplist.length() > 0){
+						String[] ips = iplist.split(",");
+						for(int i=0;i<ips.length;i++){
+							if(ipaddress.equals(ips[i])){
+								isWhite=true;
+								break;
+							}
+						}
+					}
+				}
+				
+				if(!isWhite){
+					RecordSet rs = new RecordSet();
+					rs.executeSql("select passwordlock from hrmresource where passwordlock>0 and loginid='"+loginId+"'");
+					if(rs.next()){
+				    	result.put("message", "19");
+						return result;
+					}	
+				}
+				
 				status=hrs.checkLogin(loginId, password, dynapass, tokenpass, policy);
 			}
 			/*
@@ -112,8 +132,44 @@ public class AuthService {
 			 * 20:密码已过期
 			 * 
 			 */
+			//登录密码错误并且不在白名单中的用户,重登录policy为6,不进行密码锁定次数计算
+			if( policy!=6 && status==2 && !isWhite){
+				RecordSet rs2 = new RecordSet();
+				RecordSet rs1 = new RecordSet();
+				BirthdayReminder birth_reminder = new BirthdayReminder();
+				RemindSettings settings=birth_reminder.getRemindSettings();
+				
+			    if(settings==null){
+			    	result.put("message","Cann't create connetion to database,please check your database.");
+			        return result;
+			    }
+			    String OpenPasswordLock = settings.getOpenPasswordLock();
+			    if("1".equals(OpenPasswordLock)){
+				    rs2.executeSql("select id from HrmResourceManager where loginid='"+loginId+"'");
+				    if(!rs2.next()){
+				    	String message = "";
+						String sql = "select sumpasswordwrong from hrmresource where loginid='"+loginId+"'";
+						rs1.executeSql(sql);
+						rs1.next();
+						int sumpasswordwrong = Util.getIntValue(rs1.getString(1));
+						int sumPasswordLock = Util.getIntValue(settings.getSumPasswordLock(),3);
+						int leftChance = sumPasswordLock-sumpasswordwrong-1;
+						if(leftChance==0){
+							sql = "update HrmResource set passwordlock=1,sumpasswordwrong=0 where loginid='"+loginId+"'";
+							rs1.executeSql(sql);
+							message = "19";
+						}else{
+							sql = "update HrmResource set sumpasswordwrong="+(sumpasswordwrong+1)+" where loginid='"+loginId+"'";
+							rs1.executeSql(sql);
+							message = SystemEnv.getHtmlLabelName(24466,getLanguageCode(language))+leftChance+SystemEnv.getHtmlLabelName(24467,getLanguageCode(language));
+						}
+						result.put("message", message);
+						return result;
+					}
+			    }    
+			}
 			return loginByTypes(loginId, password, language, ipaddress, auths, result,
-					status);
+					status,isWhite);
 		} else {
 			result.put("message", "11");
 		}
@@ -121,7 +177,7 @@ public class AuthService {
 	}
 
 	public Map loginByTypes(String loginId, String password, String language,
-			String ipaddress, List auths, Map result, int status) {
+			String ipaddress, List auths, Map result, int status,boolean isWhite) {
 		if (status == 1) {
 			int userid = hrs.getUserId(loginId);
 			//检查用户权限
@@ -156,11 +212,14 @@ public class AuthService {
 				boolean isLocked = false;
 				boolean isExpired = false;
 				if("1".equals(openPasswordLock)){
-					rs.executeSql("select passwordlock from hrmresource where passwordlock>0 and id="+userid);
-					if(rs.next()){
-				    	result.put("message", "19");
-				    	isLocked = true;
-					}
+					if(!isWhite){
+						rs.executeSql("update HrmResource set sumpasswordwrong=0 where passwordlock=0 and loginid='"+loginId+"'");
+//						rs.executeSql("select passwordlock from hrmresource where passwordlock>0 and id="+userid);
+//						if(rs.next()){
+//					    	result.put("message", "19");
+//					    	isLocked = true;
+//						}
+					}	
 				}
 				ChgPasswdReminder reminder=new ChgPasswdReminder();
 				RemindSettings rsettings=reminder.getRemindSettings();
@@ -220,10 +279,9 @@ public class AuthService {
 		            //次账号不允许登陆，只能通过主账号登陆后切换至次账号
 					String sql = "select accounttype,belongto from hrmresource where id=" + userid;
 					rs.execute(sql);
-					//2017-08-22 tangjianyong
-					//if(rs.next()&&"1".equals(Util.null2String(rs.getString("accounttype")))&&Util.getIntValue(rs.getString("belongto"), -1)>0) {
-						//result.put("message", "18");
-					//} else {
+//					if(rs.next()&&"1".equals(Util.null2String(rs.getString("accounttype")))&&Util.getIntValue(rs.getString("belongto"), -1)>0) {
+//						result.put("message", "18");
+//					} else {
 					
 				    	User user = hrs.getUserById(userid);
 				    	result.put("groups", userGroupidList);//将用户组放入结果集中
@@ -293,7 +351,7 @@ public class AuthService {
 		if (loginId != null && !"".equals(loginId) && password != null && !"".equals(password) && ipaddress != null && !"".equals(ipaddress)) {
 			int status =hrs.checkLogin(loginId, password, dynapass, tokenpass, policy);
 			return loginByTypes(loginId, password, language, ipaddress, auths, result,
-					status);
+					status,false);
 		} else {
 			result.put("message", "11");
 		}
@@ -401,6 +459,11 @@ public class AuthService {
 	}
 	
 	private int getLanguageCode(String language) {
+		
+		if(language.toUpperCase().indexOf("EN")>-1) {
+			return 8;
+		}
+		
 		if(language.toUpperCase().indexOf("TW")>-1) {
 			return 9;
 		}
@@ -411,10 +474,6 @@ public class AuthService {
 
 		if(language.toUpperCase().indexOf("HANT")>-1) {
 			return 9;
-		}
-		
-		if(language.toUpperCase().indexOf("EN")>-1) {
-			return 8;
 		}
 	
 		return 7;
@@ -604,13 +663,13 @@ public class AuthService {
 						flag = true;
 						break;
 					} else if(sharetype == 1) {//分部
-						List sharesubcompanyids = getOrgIdsList(sharevalue, 1);
+						List sharesubcompanyids = getOrgIdsListFromCache(sharevalue,1);
 						if(sharesubcompanyids.contains(subcompanyid)) {
 							flag = true;
 							break;
 						}
 					} else if(sharetype == 2) {//部门
-						List sharedepartmentids = getOrgIdsList(sharevalue, 2);
+						List sharedepartmentids = getOrgIdsListFromCache(sharevalue,2);
 						if(sharedepartmentids.contains(departmentid)) {
 							flag = true;
 							break;
@@ -665,9 +724,10 @@ public class AuthService {
 				
 				//String login_id = "ldap".equals(mode) ? Util.null2String(rci.getAccount(userid)) : Util.null2String(rci.getLoginID(userid));
 				
+				/* 检查验证账号密码的时候就从数据库判断过滤员工状态,此处不再判断
 				if(!"".equals(login_id)&&!status.equals("0")&&!status.equals("1")&&!status.equals("2")&&!status.equals("3")) 
 					return groupidList;
-				
+				*/
 				for(int i=0;i<conditionList.size();i++){
 					Map map=(Map)conditionList.get(i);
 					int sharetype = Util.getIntValue((String)map.get("type"),0);
@@ -683,12 +743,12 @@ public class AuthService {
 						if(sharevalue.equals(userid)) flag = true;
 					} else if(sharetype==1){
 						//分部
-						List sharesubcompanyids = getOrgIdsList(sharevalue,1);
+						List sharesubcompanyids = getOrgIdsListFromCache(sharevalue,1);
 						if(sharesubcompanyids.contains(subcompanyid)) //分部条件中包含用户所属分部
 							flag = true;
 					} else if(sharetype==2){
 						//部门
-						List sharedepartmentids = getOrgIdsList(sharevalue,2);
+						List sharedepartmentids = getOrgIdsListFromCache(sharevalue,2);
 						if(sharedepartmentids.contains(departmentid)) //部门条件中包含用户所属部门
 							flag = true;
 					} else if(sharetype==3){
@@ -720,6 +780,37 @@ public class AuthService {
 		return groupidList;
 	}
 	
+	/**
+	 * @Title: getOrgIdsListFromCache 
+	 * @Description: 递归查询组织ids数据缓存方法 
+	 * @param @param orgId
+	 * @param @param orgType
+	 * @param @return    设定文件 
+	 * @return List    返回类型 
+	 * @throws
+	 */
+	public List getOrgIdsListFromCache(String orgId,int orgType ){
+		
+		List orgIds = null;
+		String orgIdsCacheKey = "orgIds_"+orgType+"_"+orgId+"_AllUserId";
+		String orgIdsTimeCacheKey = "orgIds_"+orgType+"_"+orgId+"_Time";
+		
+		StaticObj staticobj = StaticObj.getInstance();
+
+		Long orgIdsTime = (Long)staticobj.getRecordFromObj(mobileCacheKey, orgIdsTimeCacheKey);
+		
+		long currentTime = (new Date()).getTime();
+		
+		if(staticobj.getRecordFromObj(mobileCacheKey, orgIdsCacheKey)!=null&&orgIdsTimeCacheKey!=null&&(currentTime-orgIdsTime.longValue())<=1000*60*30){
+			return (List)staticobj.getRecordFromObj(mobileCacheKey, orgIdsCacheKey);
+		}
+		
+		orgIds = getOrgIdsList(orgId, orgType);
+		staticobj.putRecordToObj(mobileCacheKey, orgIdsCacheKey, orgIds);
+		staticobj.putRecordToObj(mobileCacheKey, orgIdsTimeCacheKey, new Long(currentTime));
+		return orgIds;
+	}
+	
 	public boolean verifyQuickLogin(String verifyurl, String verifyid) {
 		boolean result = true;
 		String requestURL = null;
@@ -737,7 +828,7 @@ public class AuthService {
 			
 			requestURL+="verifyid="+verifyid;
 	        
-	        HttpClient httpClient = new HttpClient();
+			HttpClient httpClient = FWHttpConnectionManager.getHttpClient();
 	        httpClient.getHttpConnectionManager().getParams().setConnectionTimeout(3000);
 	        httpClient.getHttpConnectionManager().getParams().setSoTimeout(2000);
 	        

@@ -10,14 +10,12 @@ package weaver.file;
  * @version 1.0 ,2004-6-25
  */
 
-
-import gvo.passwd.GvoServiceFile;
-
+import gvo.passwd.GvoServiceFile; 
 import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
-import java.io.UnsupportedEncodingException;
+import java.io.UnsupportedEncodingException; 
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
@@ -29,10 +27,12 @@ import java.util.zip.ZipInputStream;
 
 import javax.servlet.http.HttpServletRequest;
 
+import weaver.aes.AES;
 import weaver.alioss.AliOSSObjectManager;
 import weaver.conn.RecordSet;
 import weaver.docs.docs.ImageFileIdUpdate;
 import weaver.email.MailCommonUtils;
+import weaver.email.service.MailAliOSSService;
 import weaver.file.multipart.DefaultFileRenamePolicy;
 import weaver.file.multipart.MultipartRequest;
 import weaver.file.multipart.UploadedFile;
@@ -48,7 +48,7 @@ public class FileUpload  extends BaseBean
 {
 	private static ImageFileIdUpdate imageFileIdUpdate = new ImageFileIdUpdate();	
 	
-    private RecordSet rs;
+    
     private MultipartRequest mpdata = null ;
     HttpServletRequest request = null ;
     private String[] filenames=null;
@@ -65,12 +65,14 @@ public class FileUpload  extends BaseBean
     private String aescode ="";
     private String remoteAddr="";
     private XssUtil xss = null;
+    private AES aes = null;
     
     public FileUpload(HttpServletRequest request)   {
     	this.remoteAddr=request.getRemoteAddr();
         if (isMultipartData(request)) mpdata = getAttachment(request);
         this.request = request ;
         this.xss = new XssUtil();
+        aes = new AES();
     }
     
     public FileUpload(HttpServletRequest request,String encode)   {
@@ -78,6 +80,7 @@ public class FileUpload  extends BaseBean
         if (isMultipartData(request)) mpdata = getAttachment(request,encode);
         this.request = request ;
         this.xss = new XssUtil();
+        aes = new AES();
     }
     
     public FileUpload(HttpServletRequest request,String encode,boolean iszip ,String isEmail)   {
@@ -85,6 +88,7 @@ public class FileUpload  extends BaseBean
         if (isMultipartData(request) && "1".equals(isEmail)) mpdata = getEmailAttachment(request,encode,iszip);
         this.request = request ;
         this.xss = new XssUtil();
+        aes = new AES();
     }
     
     public FileUpload(HttpServletRequest request,String encode,boolean iszip)   {
@@ -92,12 +96,14 @@ public class FileUpload  extends BaseBean
         if (isMultipartData(request)) mpdata = getAttachment(request,encode,iszip);
         this.request = request ;
         this.xss = new XssUtil();
+        aes = new AES();
     }
     public FileUpload(HttpServletRequest request,String encode,boolean iszip,boolean isoriginal)   {
     	this.remoteAddr=request.getRemoteAddr();
         if (isMultipartData(request)) mpdata = getAttachment(request,encode,iszip,isoriginal);
         this.request = request ;
         this.xss = new XssUtil();
+        aes = new AES();
     }
     //modify by mackjoe at 2005-11-28 td3282 获得request对象
     public HttpServletRequest getRequest(){
@@ -109,12 +115,16 @@ public class FileUpload  extends BaseBean
     	this.remoteAddr=request.getRemoteAddr();
         if (isMultipartData(request)) mpdata = getAttachment(request,iszip);
         this.request = request ;
+        this.xss = new XssUtil();
+        aes = new AES();
     }
     
     public FileUpload(HttpServletRequest request,boolean iszip,boolean isaesencrypt)   {
     	this.remoteAddr=request.getRemoteAddr();
         if (isMultipartData(request)) mpdata = getAttachment(request,iszip,isaesencrypt);
         this.request = request ;
+        this.xss = new XssUtil();
+        aes = new AES();
     }
 
 
@@ -123,6 +133,8 @@ public class FileUpload  extends BaseBean
     	this.remoteAddr=request.getRemoteAddr();
         if (isMultipartData(request)) mpdata = getAttachment(request,iszip,strDirAddr);
         this.request = request ;
+        this.xss = new XssUtil();
+        aes = new AES();
     }
 
 	//html模板图片保存
@@ -130,7 +142,9 @@ public class FileUpload  extends BaseBean
     	this.remoteAddr=Util.getIpAddr(request);
         if (isMultipartData(request)) mpdata = getAttachment(request,iszip,encoding,strDirAddr);
         this.request = request ;
-    } 
+        this.xss = new XssUtil();
+        aes = new AES();
+    }
     
 	public Hashtable getUploadImgNames(){
 		String el="",imgpath="",imgname="";
@@ -177,7 +191,7 @@ public class FileUpload  extends BaseBean
         			return xss.get(value);
         		}
         	}
-            return new String ( value.getBytes("ISO8859_1") , "UTF-8");
+            return aes.decrypt(key, new String ( value.getBytes("ISO8859_1") , "UTF-8"),request);
         }catch(Exception ex) {
         	return "" ;
         }
@@ -188,7 +202,7 @@ public class FileUpload  extends BaseBean
         if (!isMultipartData(request)) return Util.null2String(request.getParameter(key)) ;
         if (mpdata == null) return "";
         String value = Util.null2String(mpdata.getParameter(key)) ;
-        return value;
+        return aes.decrypt(key, value,request);
     }
     
     /**
@@ -211,7 +225,7 @@ public class FileUpload  extends BaseBean
       }
       
       try {
-        return new String(value.getBytes("ISO8859_1") ,"UTF-8");
+    	  return aes.decrypt(key, new String ( value.getBytes("ISO8859_1") , "UTF-8"),request);
       }catch(Exception ex) {
         return value;
       }
@@ -221,6 +235,14 @@ public class FileUpload  extends BaseBean
         if (!isMultipartData(request)) return request.getParameterValues(key) ;
         if (mpdata == null) return null;
         String[] values = mpdata.getParameterValues(key);
+        if(values==null||values.length==0)return values;
+        if(aes.isEnable()){
+	        String[] copyValues = new String[values.length];
+	        for(int i = 0;i<values.length;i++){
+	        	copyValues[i] = aes.decrypt(key,values[i],request);
+	        }
+	        return copyValues;
+        }
         return values;
     }
 
@@ -234,6 +256,14 @@ public class FileUpload  extends BaseBean
     	if (!isMultipartData(request)) return request.getParameterValues(name) ;
         if (mpdata == null) return null;
         String[] values = mpdata.getParameterValues(name);
+        if(values==null||values.length==0)return values;
+        if(aes.isEnable()){
+	        String[] copyValues = new String[values.length];
+	        for(int i = 0;i<values.length;i++){
+	        	copyValues[i] = aes.decrypt(name, values[i],request);
+	        }
+	        return copyValues;
+        }
         return values;
     }
     
@@ -244,7 +274,7 @@ public class FileUpload  extends BaseBean
 			String[]  multivalues = new String[values.length];
 	    	try {
 				for(int i=0;i<values.length;i++){
-					multivalues[i] =  new String ( Util.null2String(values[i]).getBytes("ISO8859_1") , "UTF-8");
+					multivalues[i] =  aes.decrypt(name, new String ( Util.null2String(values[i]).getBytes("ISO8859_1") , "UTF-8"),request);
 				}
 			} catch (UnsupportedEncodingException e) {
 				e.printStackTrace();
@@ -256,7 +286,7 @@ public class FileUpload  extends BaseBean
         String[]  multivalues = new String[values.length];
     	try {
 			for(int i=0;i<values.length;i++){
-				multivalues[i] =  new String ( Util.null2String(values[i]).getBytes("ISO8859_1") , "UTF-8");
+				multivalues[i] =  aes.decrypt(name,new String ( Util.null2String(values[i]).getBytes("ISO8859_1") , "UTF-8"),request);
 			}
 		} catch (UnsupportedEncodingException e) {
 			e.printStackTrace();
@@ -352,6 +382,11 @@ public class FileUpload  extends BaseBean
         return fileids;
     }
     
+    /**
+     * 处理邮件模块上传的附件存储
+     * @param uploadnames
+     * @return
+     */
     public String uploadFilesToEmail(String uploadname)   {
         String[] uploadnames = new String[1] ;
         uploadnames[0] = uploadname ;
@@ -359,6 +394,11 @@ public class FileUpload  extends BaseBean
         return filenames[0] ;
     }
     
+    /**
+     * 处理邮件模块上传的附件存储
+     * @param uploadnames
+     * @return
+     */
     public String[] uploadFilesToEmail(String[] uploadnames)   {
         if(mpdata == null) return null;
         int upload_numbers = uploadnames.length ;
@@ -392,30 +432,47 @@ public class FileUpload  extends BaseBean
         String fileContentId = "";// wmc.getCurrentFileContentId();
         String isEncoded = "";// wmc.getCurrentFilenameencode();
 
+		//判断实体文件是否存在，如果不存在，保存失败。
+        File file = new File(filerealpath);
+        if (!file.exists()) {
+            writeLog("检测到实体文件不存在，附件上传失败.originalfilename=" + originalfilename + ",filerealpath=" + filerealpath);
+            return imageid;
+        }
+
         String iszip = "0";
         String isencrypt = "0";
         if (needzip) iszip = "1";
         if (needzipencrypt) isencrypt = "1";
 
-        rs = new RecordSet();
+        RecordSet rs = new RecordSet();
         char separator = Util.getSeparator();
         String mailFileUUID = MailCommonUtils.getRandomUUID();
-        String para = "" + separator + originalfilename + separator + contenttype + separator + filerealpath
+        String para = "0" + separator + originalfilename + separator + contenttype + separator + filerealpath
                 + separator + iszip + separator + isencrypt + separator + isfileattrachment + separator + fileContentId
                 + separator + isEncoded + separator + String.valueOf(filesize) + separator + mailFileUUID;
         rs.executeProc("MailResourceFile_Insert", para);
-        rs.execute("select id from MailResourceFile where mrf_uuid='" + mailFileUUID + "'");
+        rs.executeQuery("select id from MailResourceFile where mrf_uuid = ?", mailFileUUID);
         if (rs.next()) {
             imageid = rs.getString("id");
         }
         
         // 更新加密信息
-        rs.execute("update MailResourceFile set isaesencrypt=" + isaesencrypt + ", aescode='" + aescode + "' where id=" + imageid);
+        rs.executeUpdate("update MailResourceFile set isaesencrypt=?, aescode=? where id=?", isaesencrypt, aescode, imageid);
+        
+        //处理oss存储逻辑
+        MailAliOSSService mailAliOSSService = new MailAliOSSService();
+        mailAliOSSService.updateFileToOSSByUUID(mailFileUUID);
+        
         return imageid;
     }
 
 
-
+    /**
+     * 处理邮件模块上传的附件存储
+     * @param uploadnames
+     * @param withsave
+     * @return
+     */
     public ArrayList uploadFilesToMail(String[] uploadnames,String withsave)   {
         if(mpdata == null) return null;
         int upload_numbers = uploadnames.length ;
@@ -629,7 +686,7 @@ public class FileUpload  extends BaseBean
             if( needzip ) iszip = "1" ;
             if( needzipencrypt ) isencrypt = "1" ;
 
-            rs = new RecordSet() ;
+            RecordSet rs = new RecordSet();
             char separator = Util.getSeparator() ;
 
             String para = ""+mailid + separator + originalfilename + separator
@@ -759,7 +816,7 @@ public class FileUpload  extends BaseBean
         if( needzipencrypt ) isencrypt = "1" ;
 
 
-        rs = new RecordSet() ;
+        RecordSet rs = new RecordSet();
         char separator = Util.getSeparator() ;
 
         //rs.executeProc("SequenceIndex_SelectFileid" , "" );
@@ -823,8 +880,10 @@ public class FileUpload  extends BaseBean
             imageheight.add("0") ;
             filesizes.add("0") ;
         }
+       // log.writeLog("增加加密处理:"+filerealpath);
     	// 增加加密处理，修改时间 2014-12-25
         File thefile_gvo = new File(filerealpath);
+       // log.writeLog("增加加密处理:"+thefile_gvo.exists());
    //     System.out.println("xxxxxxxxxxxxxx = " + filerealpath);
         InputStream imagefile_gvo = null;
         ZipInputStream zin_gvo = null;
@@ -835,15 +894,19 @@ public class FileUpload  extends BaseBean
 			} else{
 				imagefile_gvo = new BufferedInputStream(new FileInputStream(thefile_gvo));
 			}
+			//log.writeLog("增加加密处理:"+imagefile_gvo.toString());
 			StringBuffer log_buff = new StringBuffer();
 			log_buff.append("参数[ {imageid:");log_buff.append(imageid);
 			log_buff.append(",filename:");log_buff.append(originalfilename);
 			log_buff.append(",filerealpath:");log_buff.append(filerealpath);
 			log_buff.append("}]");
+			//log.writeLog("增加加密处理:"+log_buff.toString());
 			
 	        // 判断是否是加密文件 ：  modify by tony 2014/12/14   如果是加密文件，已经解密处理！
 	        GvoServiceFile  gsf = new  GvoServiceFile();
+	        //log.writeLog("增加加密处理:111");
 	        String filename_gvo = gsf.gvo_isEncrypt(log_buff.toString(),imagefile_gvo);
+	        //log.writeLog("增加加密处理:"+filename_gvo);
 	        if(!"".equals(filename_gvo)){
 	        	// 文件替换
 	        	gsf.changeFile(filename_gvo, filerealpath, iszip, contenttype);
@@ -854,7 +917,6 @@ public class FileUpload  extends BaseBean
         }catch(Exception e) {
         	log.writeLog("上传加密处理异常！");
         }
-
         return imageid+"";
 
         /* 原有的存储附件数据在数据库中的方式

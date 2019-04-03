@@ -8,7 +8,7 @@ package weaver.file;
  * @author     ,Charoes Huang
  * @version 1.0,2004-6-25
  */
-import gvo.passwd.GvoServiceFile;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
@@ -29,7 +29,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.zip.ZipInputStream;
 
 import javax.servlet.ServletException;
@@ -40,7 +39,6 @@ import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang3.StringUtils;
 
 import weaver.WorkPlan.WorkPlanService;
 import weaver.alioss.AliOSSObjectManager;
@@ -62,7 +60,6 @@ import weaver.splitepage.operate.SpopForDoc;
 import weaver.system.SystemComInfo;
 import weaver.systeminfo.SystemEnv;
 import weaver.voting.VotingManager;
-import weaver.voting.groupchartvote.ImageCompressUtil;
 import weaver.workflow.request.RequestAnnexUpload;
 import weaver.workflow.request.WFUrgerManager;
 import weaver.worktask.worktask.WTRequestUtil;
@@ -71,21 +68,20 @@ import de.schlichtherle.util.zip.ZipEntry;
 import de.schlichtherle.util.zip.ZipOutputStream;
 import weaver.crm.CrmShareBase;
 import weaver.social.service.SocialIMService;
-
+import gvo.passwd.GvoServiceFile;
 import com.weaver.formmodel.util.StringHelper;
 import weaver.formmode.setup.ModeRightInfo;
 
-public class FileDownload extends HttpServlet {
+public class FileDownloadold extends HttpServlet {
     /**
      * 是否需要记录下载次数
      */
     private boolean isCountDownloads = false;
     private String agent = "";
-    private  List fileNameEcoding ;
+	private  List fileNameEcoding ;
     public void doGet(HttpServletRequest req, HttpServletResponse res) throws ServletException, IOException {    
         String type = Util.null2String(req.getParameter("type"));
-    	GvoServiceFile gsf = new GvoServiceFile();
-        int nolog = Util.getIntValue(Util.null2String(req.getParameter("nolog")),0);
+		GvoServiceFile gsf = new GvoServiceFile();
         if(!"netimag".equals(type)){
         String clientEcoding = "GBK";
         try
@@ -108,7 +104,7 @@ public class FileDownload extends HttpServlet {
         }
         
         agent = req.getHeader("user-agent");
-        String frompdfview = Util.null2String(req.getParameter("frompdfview"));
+        
         String downloadBatch = Util.null2String(req.getParameter("downloadBatch"));
         //只下载附件，而不是下载文档的附件
         String onlydownloadfj = Util.null2String(req.getParameter("onlydownloadfj"));
@@ -193,13 +189,13 @@ public class FileDownload extends HttpServlet {
                 docsubject=Util.null2String(rsimagefileid.getString("docsubject"));
             }
             List filenameList = new ArrayList();
-            fileNameEcoding = new ArrayList();
+			fileNameEcoding = new ArrayList();
             List filerealpathList = new ArrayList();
             List filerealpathTempList = new ArrayList();
             //List filerealpathTempParentList = new ArrayList();
             File fileTemp=null;
             String sqlfilerealpath="";
-            String gvo_encrypt = "";
+			String gvo_encrypt = "";
             ImageFileManager imageFileManager=new ImageFileManager();
             if(delImgIds!=null &&!"".equals(delImgIds)){
                 //sqlfilerealpath="select imagefilename,filerealpath,iszip,isencrypt,imagefiletype , imagefileid, imagefile from ImageFile where imagefileid in ("+delImgIds+")";
@@ -210,10 +206,6 @@ public class FileDownload extends HttpServlet {
             }
             
             rsimagefileid.executeSql(sqlfilerealpath);
-            String fromrequest = req.getParameter("fromrequest");
-            
-            Map<String,String> filenameMap = new HashMap<String,String>();
-            
             while(rsimagefileid.next()){
                 try{
                     String imagefileid = Util.null2String(rsimagefileid.getString("imagefileid"));
@@ -226,38 +218,7 @@ public class FileDownload extends HttpServlet {
                     String isencrypt = Util.null2String(rsimagefileid.getString("isencrypt"));
                     String isaesencrypt = Util.null2String(rsimagefileid.getString("isaesencrypt"));
                     String aescode = Util.null2String(rsimagefileid.getString("aescode"));
-                    gvo_encrypt = Util.null2String(rsimagefileid.getString("gvo_encrypt"));
-                    
-                    /**流程下载附件，获取最新版本附件下载 start */
-                    if("1".equals(fromrequest)){
-                        RecordSet rs = new RecordSet();
-                        rs.executeSql("select doceditionid,id from DocDetail where id=(select max(docid) from DocImageFile where imagefileid=" + imagefileid + ")");
-                        if(rs.next()){
-                           int doceditionid = rs.getInt("doceditionid");
-                           int docid = rs.getInt("id");
-                           
-                           if(doceditionid > 0){  //有多版本文档，取最新版本文档
-                               rs.executeSql("select id from DocDetail where doceditionid=" + doceditionid + " order by docedition desc");
-                               if(rs.next()){
-                                   docid = rs.getInt("id");
-                               }
-                           }
-                           
-                           //在新版本文档下取最新附件
-                           rs.executeSql("select f.imagefileid,f.imagefilename,f.filerealpath,d.imagefilename realname from DocImageFile d,imagefile f where d.imagefileid=f.imagefileid and d.docid=" + docid + " order by d.versionId desc");
-                           if(rs.next()){
-                               imagefileid = rs.getString("imagefileid");
-                               filename = Util.null2String(rsimagefileid.getString("realname"));
-                               if(filename.equals("")){
-                                   filename = Util.null2String(rsimagefileid.getString("imagefilename"));
-                               }
-                               filerealpath = Util.null2String(rsimagefileid.getString("filerealpath"));
-                           }
-                        }
-                    }
-                    /**流程下载附件，获取最新附件 end */ 
-                    
-                    
+                	gvo_encrypt = Util.null2String(rsimagefileid.getString("gvo_encrypt"));
                     filenameList.add(filename);
                     filerealpathList.add(filerealpath);
                         //是否需要记录日志
@@ -285,9 +246,6 @@ public class FileDownload extends HttpServlet {
                     }
                     
                     InputStream imagefile = null;
-                    
-                    imageFileManager.getImageFileInfoById(Util.getIntValue(imagefileid));
-                    imagefile=imageFileManager.getInputStream();
                     if("1".equals(gvo_encrypt)&&"1".equals(download)){
 						//
 						StringBuffer log_buff = new StringBuffer();
@@ -298,9 +256,11 @@ public class FileDownload extends HttpServlet {
 						// 加密
 						// boolean isencfile = true;  //false 解密 true 加密
 						imagefile = gsf.getGvoInputStream(log_buff.toString(),imagefile,true);
+					}else {
+                    	imageFileManager.getImageFileInfoById(Util.getIntValue(imagefileid));
+                    	imagefile=imageFileManager.getInputStream();
                     }
-                    
-                    if(download.equals("1") && (isOfficeToDocument(extName))&&isMsgObjToDocument()) {
+                    if(download.equals("1") && ("xls".equalsIgnoreCase(extName) || "doc".equalsIgnoreCase(extName)||"wps".equalsIgnoreCase(extName)||"ppt".equalsIgnoreCase(extName))&&isMsgObjToDocument()) {
                         //正文的处理
                         ByteArrayOutputStream bout = null;
                         try {
@@ -338,30 +298,21 @@ public class FileDownload extends HttpServlet {
                             }
                         }   
                         
-                        String _fielname = UUID.randomUUID().toString();
-                        if(filename.indexOf(".") > -1){
-                            int bx = filename.lastIndexOf(".");
-                            if(bx>=0){
-                            	_fielname += filename.substring(bx, filename.length());
-                            }
-                        }
-                        
                         if("".equals(fileFoderCompare)){
                             fileFoderCompare = GCONST.getRootPath();
-                            fileFoderCompare = fileFoderCompare + "filesystem" + File.separatorChar+ "downloadBatchTemp"+File.separatorChar+userid+currentDateTime+File.separatorChar+_fielname;
+                            fileFoderCompare = fileFoderCompare + "filesystem" + File.separatorChar+ "downloadBatchTemp"+File.separatorChar+userid+currentDateTime+File.separatorChar+filename;
                         }else{
                             if(fileFoderCompare.endsWith(File.separator)){
-                                fileFoderCompare += "downloadBatchTemp"+File.separatorChar+userid+currentDateTime+File.separatorChar+_fielname;
+                                fileFoderCompare += "downloadBatchTemp"+File.separatorChar+userid+currentDateTime+File.separatorChar+filename;
                             }else{
-                                fileFoderCompare += File.separator+ "downloadBatchTemp"+File.separatorChar+userid+currentDateTime+File.separatorChar+_fielname;
+                                fileFoderCompare += File.separator+ "downloadBatchTemp"+File.separatorChar+userid+currentDateTime+File.separatorChar+filename;
                             }
-                        }
-                        filenameMap.put(fileFoderCompare, filename);
+                        }                   
                         
                         //String fileFoder=GCONST.getRootPath()+ "downloadBatchTemp"+File.separatorChar+userid+File.separatorChar;//获取系统的运行目录 如：d:\ecology\
                         //附件文件重名加数字后缀区别:因为不加以区别的话,压缩到压缩包时只取一个文件(压缩包中不能有同名文件) 加唯一标识'_imagefileid'
                         //String fileFoderCompare=GCONST.getRootPath()+ "downloadBatchTemp"+File.separatorChar+userid+File.separatorChar+filename;
-                        String newFileName=_fielname;
+                        String newFileName=filename;
                         for(int j=0;j<filerealpathTempList.size();j++){
                             if(fileFoderCompare.equals(filerealpathTempList.get(j))){
                                 int lastindex=filename.lastIndexOf(".");
@@ -372,6 +323,8 @@ public class FileDownload extends HttpServlet {
                                 }
                             }
                         }
+						fileNameEcoding.add(newFileName);
+						newFileName=userid+currentDateTime+"_"+imagefileid;
                         fileTemp=this.fileCreate(fileFoder, newFileName);//在系统的根目录下创建了一个文件夹(downloadBatchTemp)及附件文件
                         out = new FileOutputStream(fileTemp);
                         while ((byteread = imagefile.read(data)) != -1) {
@@ -449,7 +402,7 @@ public class FileDownload extends HttpServlet {
                     try{
                          is=new FileInputStream(files[j]); 
                          //System.out.println("第["+j+"]个文件的名称为："+files[j].getName());
-                         ZipEntry ze=new ZipEntry(filenameMap.get(files[j].getAbsolutePath()));//设置文件编码格式 
+                         ZipEntry ze=new ZipEntry((String)fileNameEcoding.get(j));//设置文件编码格式 
                          zout.putNextEntry(ze); 
                          int len; 
                          //读取下载文件内容 
@@ -530,6 +483,7 @@ public class FileDownload extends HttpServlet {
                     String isaesencrypt = Util.null2String(rsimagefileid.getString("isaesencrypt"));
                     String aescode = Util.null2String(rsimagefileid.getString("aescode"));
                     String gvo_encrypt = Util.null2String(rsimagefileid.getString("gvo_encrypt"));
+
                     filenameList.add(filename);
                     filerealpathList.add(filerealpath);
                     String extName = "";
@@ -543,7 +497,7 @@ public class FileDownload extends HttpServlet {
                     }
                     
                     InputStream imagefile = null;
-                    if("1".equals(gvo_encrypt)&&"1".equals(download)){
+					if("1".equals(gvo_encrypt)&&"1".equals(download)){
 						StringBuffer log_buff = new StringBuffer();
 						log_buff.append("参数[ {imageid:");log_buff.append(imagefileid);
 						log_buff.append(",filename:");log_buff.append(filename);
@@ -553,11 +507,10 @@ public class FileDownload extends HttpServlet {
 						// boolean isencfile = true;  //false 解密 true 加密
 						imagefile = gsf.getGvoInputStream(log_buff.toString(),imagefile,true);
 					}else {
-                    imageFileManager.getImageFileInfoById(Util.getIntValue(imagefileid));
-                    imagefile=imageFileManager.getInputStream();
-					}
-                    
-                    if(download.equals("1") && (isOfficeToDocument(extName))&&isMsgObjToDocument()) {
+                    	imageFileManager.getImageFileInfoById(Util.getIntValue(imagefileid));
+                    	imagefile=imageFileManager.getInputStream();
+                    }
+                    if(download.equals("1") && ("xls".equalsIgnoreCase(extName) || "doc".equalsIgnoreCase(extName)||"wps".equalsIgnoreCase(extName)||"ppt".equalsIgnoreCase(extName))&&isMsgObjToDocument()) {
                         //正文的处理
                         ByteArrayOutputStream bout = null;
                         try {
@@ -738,43 +691,7 @@ public class FileDownload extends HttpServlet {
         if(fileid <= 0){//转化为int型，防止SQL注入
             res.sendRedirect("/notice/noright.jsp");                                
             return;
-		}
-		
-        /**流程下载附件，获取最新版本附件下载 start */
-        String fromrequest = req.getParameter("fromrequest");
-        if("1".equals(fromrequest)){
-            RecordSet rs = new RecordSet();
-            rs.executeSql("select doceditionid,id from DocDetail where id=(select max(docid) from DocImageFile where imagefileid=" + fileid + ")");
-            if(rs.next()){
-               int doceditionid = rs.getInt("doceditionid");
-               int docid = rs.getInt("id");
-               
-               if(doceditionid > 0){  //有多版本文档，取最新版本文档
-                   rs.executeSql("select id from DocDetail where doceditionid=" + doceditionid + " order by docedition desc");
-                   if(rs.next()){
-                       docid = rs.getInt("id");
-                   }
-               }
-               
-               //在新版本文档下取最新附件
-               rs.executeSql("select imagefileid from DocImageFile where docid=" + docid + " order by versionId desc");
-               int firstId = 0;
-               int i = 0;
-               while(rs.next()){
-            	   if(i == 0){
-            		   firstId = rs.getInt("imagefileid");
-            	   }else{
-            		   if(fileid == rs.getInt("imagefileid")){
-            			   firstId = fileid;
-            		   }
-            	   }
-                   i++;
-               }
-               fileid = firstId;
-            }
         }
-        /**流程下载附件，获取最新附件 end */ 
-		
         //String strSql="select docpublishtype from docdetail where id in (select docid from docimagefile where imagefileid="+fileid+") and ishistory <> 1";    
         RecordSet statement = new RecordSet();   //by ben  开启连接后知道文件下载才关闭，数据库连接时间太长
         //RecordSet rs =new RecordSet();
@@ -868,12 +785,7 @@ public class FileDownload extends HttpServlet {
                 try{
                     
                     ResourceComInfo  comInfo = new ResourceComInfo();
-                    String fromhrmcontract = Util.null2String(req.getParameter("fromhrmcontract"));					
-                    String f_weaver_belongto_userid=Util.null2String(req.getParameter("f_weaver_belongto_userid"));//需要增加的代码
-                    String f_weaver_belongto_usertype=Util.null2String(req.getParameter("f_weaver_belongto_usertype"));//需要增加的代码
-                    user = HrmUserVarify.getUser(req, res, f_weaver_belongto_userid, f_weaver_belongto_usertype) ;//需要增加的代码
-                    int hrmid = user.getUID();
-                    boolean ishr = (HrmUserVarify.checkUserRight("HrmContractAdd:Add",user));//人力资源管理员
+                    String fromhrmcontract = Util.null2String(req.getParameter("fromhrmcontract"));
                     if(!"".equals(fromhrmcontract)){
                         String contractman ="";
                         String contractdocid ="";
@@ -887,17 +799,18 @@ public class FileDownload extends HttpServlet {
                         contSql = "select * from DocImageFile where docid="+contractdocid+" and imagefileid="+fileid;
                         rs.executeSql(contSql);
                         if(rs.next()){
-                           
+                            String f_weaver_belongto_userid=Util.null2String(req.getParameter("f_weaver_belongto_userid"));//需要增加的代码
+                            String f_weaver_belongto_usertype=Util.null2String(req.getParameter("f_weaver_belongto_usertype"));//需要增加的代码
+                            user = HrmUserVarify.getUser(req, res, f_weaver_belongto_userid, f_weaver_belongto_usertype) ;//需要增加的代码
+                            //user = HrmUserVarify.getUser (req ,res) ;
+                            int hrmid = user.getUID();
                             boolean ism = comInfo.isManager(hrmid,contractman); //上级
-                            boolean ishe = (hrmid == Util.getIntValue(contractman)); //本人                         
+                            boolean ishe = (hrmid == Util.getIntValue(contractman)); //本人
+                            boolean ishr = (HrmUserVarify.checkUserRight("HrmContractAdd:Add",user));//人力资源管理员
                             if(ism || ishe || ishr) hasRight = true;
                         }
                     }else{
-                        if (ishr || hrmid == 1) {
-                            hasRight = true;
-                        } else {
-                            hasRight = getWhetherHasRight("" + fileid, req, res, requestid);
-                        }
+                        hasRight=getWhetherHasRight(""+fileid,req,res,requestid);
                     }
                 }catch(Exception ex){
                     BaseBean basebean = new BaseBean();
@@ -922,11 +835,11 @@ public class FileDownload extends HttpServlet {
             String filerealpath = "";
             String iszip = "";
             String isencrypt = "";
+			String gvo_encrypt = "";
             String isaesencrypt="";
             String aescode = "";
             String tokenKey="";
             String storageStatus = "";
-            String gvo_encrypt = "";
             String comefrom="";
 
             if ("1".equals(req.getParameter("countdownloads"))) {
@@ -938,7 +851,7 @@ public class FileDownload extends HttpServlet {
 
             
             //String sql = "select imagefilename,filerealpath,iszip,isencrypt,imagefiletype , imagefile from ImageFile where imagefileid = " + fileid;
-            String sql = "select t1.imagefilename,t1.filerealpath,t1.iszip,t1.isencrypt,t1.imagefiletype , t1.imagefileid, t1.imagefile,t1.isaesencrypt,t1.aescode,t2.imagefilename as realname,t1.TokenKey,t1.StorageStatus,t1.comefrom,t1.gvo_encrypt from ImageFile t1 left join DocImageFile t2 on t1.imagefileid = t2.imagefileid where t1.imagefileid = "+fileid;
+            String sql = "select t1.imagefilename,t1.filerealpath,t1.iszip,t1.isencrypt,t1.imagefiletype , t1.imagefileid, t1.imagefile,t1.isaesencrypt,t1.aescode,t2.imagefilename as realname,t1.gvo_encrypt from ImageFile t1 left join DocImageFile t2 on t1.imagefileid = t2.imagefileid where t1.imagefileid = "+fileid;
             boolean isoracle = (statement.getDBType()).equals("oracle");
             
             String extName = "";
@@ -957,7 +870,7 @@ public class FileDownload extends HttpServlet {
                         decryptPdfImageFileId=Util.getIntValue(rs.getString("decryptPdfImageFileId"),-1);
                     }
                     if(decryptPdfImageFileId>0){
-                        sql = "select t1.imagefilename,t1.filerealpath,t1.iszip,t1.isencrypt,t1.imagefiletype , t1.imagefileid, t1.imagefile,t1.isaesencrypt,t1.aescode,t2.imagefilename as realname,t1.TokenKey,t1.StorageStatus,t1.comefrom,t1.gvo_encryptfrom ImageFile t1 left join DocImageFile t2 on t1.imagefileid = t2.imagefileid where t1.imagefileid = "+decryptPdfImageFileId;
+                        sql = "select t1.imagefilename,t1.filerealpath,t1.iszip,t1.isencrypt,t1.imagefiletype , t1.imagefileid, t1.imagefile,t1.isaesencrypt,t1.aescode,t2.imagefilename as realname,t1.TokenKey,t1.StorageStatus,t1.comefrom from ImageFile t1 left join DocImageFile t2 on t1.imagefileid = t2.imagefileid where t1.imagefileid = "+decryptPdfImageFileId;
                         statement.execute(sql);
                         if(!statement.next()){
                             return ;
@@ -966,13 +879,14 @@ public class FileDownload extends HttpServlet {
                 }
                 filerealpath = Util.null2String(statement.getString("filerealpath"));
                 iszip = Util.null2String(statement.getString("iszip"));
+				gvo_encrypt = Util.null2String(statement.getString("gvo_encrypt"));
                 isencrypt = Util.null2String(statement.getString("isencrypt"));
                 isaesencrypt = Util.null2o(statement.getString("isaesencrypt"));
                 aescode = Util.null2String(statement.getString("aescode"));
                 tokenKey = Util.null2String(statement.getString("TokenKey"));
                 storageStatus = Util.null2String(statement.getString("StorageStatus"));
                 comefrom = Util.null2String(statement.getString("comefrom"));
-                gvo_encrypt = Util.null2String(statement.getString("gvo_encrypt"));                              
+                                
                 if(filename.indexOf(".") > -1){
                     int bx = filename.lastIndexOf(".");
                     if(bx>=0){
@@ -1007,7 +921,7 @@ public class FileDownload extends HttpServlet {
                         contenttype = "image/png";
                         res.addHeader("Cache-Control", "private, max-age=8640000"); 
                         isPic=true;
-                    }else if(filename.toLowerCase().endsWith(".jpg") || filename.toLowerCase().endsWith(".jpeg")) {
+                    }else if(filename.toLowerCase().endsWith(".jpg")) {
                         contenttype = "image/jpg";
                         res.addHeader("Cache-Control", "private, max-age=8640000"); 
                         isPic=true;
@@ -1023,10 +937,10 @@ public class FileDownload extends HttpServlet {
                         contenttype = statement.getString("imagefiletype");
                     }
                     try {
-                    	 if((agent.contains("Firefox")||agent.contains(" Chrome")||agent.contains("Safari") )&& !agent.contains("Edge")){
-                    		res.setHeader("content-disposition","inline; filename=\"" +  new String(filename.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", "").getBytes("UTF-8"),"ISO-8859-1"));
+                        if((agent.contains("Firefox")||agent.contains(" Chrome")||agent.contains("Safari") )&& !agent.contains("Edge")){
+                            res.setHeader("content-disposition", "inline; filename=\"" +  new String(filename.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", "").getBytes("UTF-8"),"ISO-8859-1")+"\"");
                         }else{
-                            res.setHeader("content-disposition", "inline; filename=\"" + URLEncoder.encode(filename.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", ""),"UTF-8").replaceAll("\\+", "%20").replaceAll("%28", "(").replaceAll("%29", ")")+"\"");
+                            res.setHeader("content-disposition", "inline; filename=\"" + URLEncoder.encode(filename.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", ""),"UTF-8").replaceAll("\\+", "%20")+"\"");
                         }
                     } catch (Exception ecode) {
                     }
@@ -1037,35 +951,23 @@ public class FileDownload extends HttpServlet {
                         //System.out.println(new String(new String(filename.getBytes(clientEcoding), "ISO8859_1").getBytes("ISO8859_1"),"utf-8"));
                         //System.out.println(new String(filename.getBytes(clientEcoding)));
                         if((agent.contains("Firefox")||agent.contains(" Chrome")||agent.contains("Safari") )&& !agent.contains("Edge")){
-							res.reset();
-                            res.resetBuffer();
-                            String headerValue = "attachment; filename=\""
-                                    + new String(filename.replaceAll("<", "")
-                                    .replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", "").getBytes("UTF-8"),"ISO-8859-1") +"\";";
-                            res.setHeader("content-disposition",headerValue);
-                        	//res.setHeader("content-disposition", "attachment; filename=\"" +  new String(filename.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", "").getBytes("UTF-8"),"ISO-8859-1"));
+                            res.setHeader("content-disposition", "attachment; filename=\"" +  new String(filename.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", "").getBytes("UTF-8"),"ISO-8859-1")+"\"");
                         }else{
-                            res.setHeader("content-disposition", "attachment; filename=\"" + 
-                                    URLEncoder.encode(filename.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", ""),"UTF-8").replaceAll("\\+", "%20").replaceAll("%28", "(").replaceAll("%29", ")")+"\"");
+                            res.setHeader("content-disposition", "attachment; filename=\"" + URLEncoder.encode(filename.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", ""),"UTF-8").replaceAll("\\+", "%20")+"\"");
                         }
                     } catch (Exception ecode) {
                     }
                 }
-                String iscompress = Util.null2String(req.getParameter("iscompress"));
-                String targetFilePath="";
+                
                 if(isEnableForDsp){
                     
                     boolean  isAliOSSToServer=AliOSSObjectManager.isAliOSSToServer(comefrom);
-                    if(isAliOSSToServer||isPic || !frompdfview.isEmpty()){
+                    if(isAliOSSToServer||isPic){
                         InputStream imagefile = null;
                         ServletOutputStream out = null;
                         try {
                             imagefile=weaver.alioss.AliOSSObjectUtil.downloadFile(tokenKey);
-                            if("1".equals(iscompress)){
-                            	ImageCompressUtil imageCompressUtil=new ImageCompressUtil();
-        	                   	targetFilePath = imageCompressUtil.getTargetFilePath();
-        	                   	imagefile=imageCompressUtil.imageCompress(imagefile,targetFilePath);
-                            }
+                            
                             out = res.getOutputStream();
                             res.setContentType(contenttype);
                                         
@@ -1081,16 +983,10 @@ public class FileDownload extends HttpServlet {
                             if(imagefile!=null) imagefile.close();
                             if(out!=null) out.flush();
                             if(out!=null) out.close();
-                            if("1".equals(iscompress)&& StringUtils.isNotEmpty(targetFilePath)){
-                            	File targetfile = new File(targetFilePath);
-                                if(targetfile.exists()){
-                                	targetfile.delete();   
-                                }
-                            }
                         }                           
                         
                         try{
-                            if(needUser&&nolog==0) {
+                            if(needUser) {
                                 //记录下载日志 begin
                                 HttpSession session = req.getSession(false);
                                 if (session != null) {
@@ -1120,7 +1016,7 @@ public class FileDownload extends HttpServlet {
                         String urlString=weaver.alioss.AliOSSObjectUtil.generatePresignedUrl(tokenKey,filename,contenttype,isInline,cacheContorl,isSafari);
                         if(urlString!=null){
                             try{
-                                if(needUser&&nolog==0) {
+                                if(needUser) {
                                     //记录下载日志 begin
                                     HttpSession session = req.getSession(false);
                                     if (session != null) {
@@ -1166,17 +1062,17 @@ public class FileDownload extends HttpServlet {
                     } else{
                         imagefile = new BufferedInputStream(new FileInputStream(thefile));
                     }
-                    if("1".equals(download)&&"1".equals(gvo_encrypt)){
-    					StringBuffer log_buff = new StringBuffer();
-    					log_buff.append("参数[ {imageid:");log_buff.append(fileid);
-    					log_buff.append(",filename:");log_buff.append(filename);
-    					log_buff.append(",filerealpath:");log_buff.append(filerealpath);
-    					log_buff.append("}]");
-    					// 加密
-    					// boolean isencfile = true;  //false 解密 true 加密
-    					imagefile = gsf.getGvoInputStream(log_buff.toString(),imagefile,true);
-    				}
-                    if(download.equals("1") && (isOfficeToDocument(extName))&&isMsgObjToDocument()) {
+					if("1".equals(download)&&"1".equals(gvo_encrypt)){
+					StringBuffer log_buff = new StringBuffer();
+					log_buff.append("参数[ {imageid:");log_buff.append(fileid);
+					log_buff.append(",filename:");log_buff.append(filename);
+					log_buff.append(",filerealpath:");log_buff.append(filerealpath);
+					log_buff.append("}]");
+					// 加密
+					// boolean isencfile = true;  //false 解密 true 加密
+					imagefile = gsf.getGvoInputStream(log_buff.toString(),imagefile,true);
+				}
+                    if(download.equals("1") && ("xls".equalsIgnoreCase(extName) || "doc".equalsIgnoreCase(extName)||"wps".equalsIgnoreCase(extName)||"ppt".equalsIgnoreCase(extName))&&isMsgObjToDocument()) {
                         //正文的处理
                         ByteArrayOutputStream bout = null;
                         try {
@@ -1207,11 +1103,7 @@ public class FileDownload extends HttpServlet {
                     if(isaesencrypt.equals("1")){
                         imagefile = AESCoder.decrypt(imagefile, aescode); 
                     }
-                    if("1".equals(iscompress)){
-	                   	ImageCompressUtil imageCompressUtil=new ImageCompressUtil();
-	                   	targetFilePath = imageCompressUtil.getTargetFilePath();
-	                   	imagefile=imageCompressUtil.imageCompress(imagefile,targetFilePath);
-	                }
+                    
                     while ((byteread = imagefile.read(data)) != -1) {
                         out.write(data, 0, byteread);                   
                         out.flush();
@@ -1225,16 +1117,9 @@ public class FileDownload extends HttpServlet {
                     if(zin!=null) zin.close();
                     if(out!=null) out.flush();
                     if(out!=null) out.close();
-                    if("1".equals(iscompress)&& StringUtils.isNotEmpty(targetFilePath)){
-                    	File targetfile = new File(targetFilePath);
-                        if(targetfile.exists()){
-                        	targetfile.delete();   
-                        }
-                    }
-                    
                 }
                 
-                if(needUser&&nolog==0) {
+                if(needUser) {
                     //记录下载日志 begin
                     HttpSession session = req.getSession(false);
                     if (session != null) {
@@ -1340,7 +1225,7 @@ public class FileDownload extends HttpServlet {
         if(fileId==null||fileId.trim().equals("")){
             return false;
         }
-        
+
         RecordSet rs = new RecordSet();
         //是否必须授权     1：是   0或其他：否
         String mustAuth=Util.null2String(rs.getPropValue("FileDownload","mustAuth"));           
@@ -1398,8 +1283,7 @@ public class FileDownload extends HttpServlet {
                 rs.executeSql("select imageFileId,docId from "+comefrom+"  where (pdfFileId="+fileId+" or swfFileId="+fileId+") order by id desc");
                 if(rs.next()){
                     fileId_related=Util.getIntValue(rs.getString("imageFileId"),0);
-                    //docId_related=Util.getIntValue(rs.getString("docId"),0);
-					docId_related=0;					
+                    docId_related=Util.getIntValue(rs.getString("docId"),0);                
                 }
                 if(docId_related>0){
                     docIdList.add(""+docId_related);
@@ -1409,8 +1293,7 @@ public class FileDownload extends HttpServlet {
                 rs.executeSql("select imageFileId,docId from "+comefrom+"  where  htmlFileId="+fileId+" order by id desc");
                 if(rs.next()){
                     fileId_related=Util.getIntValue(rs.getString("imageFileId"),0);
-                    //docId_related=Util.getIntValue(rs.getString("docId"),0); 
-					docId_related=0;		
+                    docId_related=Util.getIntValue(rs.getString("docId"),0);                
                 }
                 if(docId_related>0){
                     docIdList.add(""+docId_related);
@@ -1420,8 +1303,7 @@ public class FileDownload extends HttpServlet {
                 rs.executeSql("select imageFileId,docId from DocPreviewHtmlImage  where  picFileId="+fileId+"  order by id desc");
                 if(rs.next()){
                     fileId_related=Util.getIntValue(rs.getString("imageFileId"),0);
-                    //docId_related=Util.getIntValue(rs.getString("docId"),0); 
-					docId_related=0;
+                    docId_related=Util.getIntValue(rs.getString("docId"),0);                
                 }
                 if(docId_related>0){
                     docIdList.add(""+docId_related);
@@ -1469,10 +1351,6 @@ public class FileDownload extends HttpServlet {
             hasRight=true;
             return hasRight;
         }       
-    	if(comefrom.equals("VotingAttachment")){  //
-            VotingManager votingManager = new VotingManager();
-            return votingManager.hasRightByFileid(votingId, Util.getIntValue(fileId,0), user);
-        }
         
         DocManager docManager=new DocManager();
         String docStatus="";
@@ -1629,7 +1507,6 @@ public class FileDownload extends HttpServlet {
                 if (!wfum.OperHaveDocViewRight(requestid,user.getUID(),Util.getIntValue(loginType,1),""+docId)&&!coworkDAO.haveRightToViewDoc(userId,docId)&&!votingManager.haveViewVotingDocRight(parameterMap)
                   &&!wfum.OperHaveDocViewRight(requestid,desrequestid,Util.getIntValue(userId),Util.getIntValue(loginType),""+docId)                        
                   &&!wfum.getWFShareDesRight(requestid,wfdesrequestid,user,Util.getIntValue(loginType),""+docId)
-                  &&!wfum.getWFChatShareRight(requestid,Util.getIntValue(userId),Util.getIntValue(loginType),""+docId)
                   &&!wfum.UrgerHaveDocViewRight(requestid,Util.getIntValue(userId),Util.getIntValue(loginType),""+docId)
                   &&!wfum.getMonitorViewObjRight(requestid,Util.getIntValue(userId),""+docId,"0")
                   &&!wfum.getWFShareViewObjRight(requestid,user,""+docId,"0")
@@ -1648,7 +1525,7 @@ public class FileDownload extends HttpServlet {
     			}
     		}
             
-            if(!canReader&&!hasRight && !workplanid.equals(""))  {//如果没有查看权限，判断是否通过日程赋权
+            if(!canReader&&!hasRight)  {//如果没有查看权限，判断是否通过日程赋权
                 WorkPlanService workPlanService = new WorkPlanService();
                 if (!workPlanService.UrgerHaveWorkplanDocViewRight(workplanid,user,Util.getIntValue(loginType),""+docId)){
                     hasRight=false;
@@ -1686,57 +1563,37 @@ public class FileDownload extends HttpServlet {
                     hasRight = false;
     			}
     		}
-            // 如果没有下载权限，查找是否协作区附件赋权
-            if(!hasRight) {
-                int coworkid = Util.getIntValue(req.getParameter("coworkid"));
-                CoworkDAO coworkDAO = new CoworkDAO(coworkid);
-                hasRight = coworkDAO.haveRightToViewDoc(userId,docId);
-            }
-            
-			if(hasRight){
-				return hasRight;
-			}
         }
         //文档模块  附件查看权限控制  结束        
         
         //检查社交平台附加权限
         hasRight=SocialIMService.checkFileRight(user, fileId, isDocFile, hasRight);
     	if(!hasRight) {//查看是否有建模关联授权
-            String referer = req.getHeader("referer");
-            if(referer.indexOf("&") == -1){
-            	referer = req.getQueryString();
-            }
-    		if(referer.contains("formmode_authorize")){    //表单建模判断关联授权
-    			String formmodeflag ="formmode_authorize";
-        		Map<String,String> formmodeAuthorizeInfo = new HashMap<String,String>();
-        		Map<String,String> formmode_authorizeMap = new HashMap<String,String>();
-        			int modeId = 0;
-        			int formmodebillId = 0;
-        			int fieldid = 0;
-        			int formModeReplyid = 0;
-        			String fMReplyFName = "";
-        			String []  refArr = referer.split("&");
-        			for (int i = 0; i < refArr.length; i++) {
-        				if(refArr[i].split("=").length ==2){
-        					formmode_authorizeMap.put(refArr[i].split("=")[0], refArr[i].split("=")[1]);        					
-        				}
-        			}
-        			modeId = Util.getIntValue(formmode_authorizeMap.get("authorizemodeId"),0);
-        			formmodebillId = Util.getIntValue(formmode_authorizeMap.get("authorizeformmodebillId"),0);
-        			fieldid = Util.getIntValue(formmode_authorizeMap.get("authorizefieldid"),0);
-        			formModeReplyid = Util.getIntValue(formmode_authorizeMap.get("authorizeformModeReplyid"),0);
-        			fMReplyFName = Util.null2String(formmode_authorizeMap.get("authorizefMReplyFName"));
-        			ModeRightInfo modeRightInfo = new ModeRightInfo();
-        			modeRightInfo.setUser(user);
-            			if(formModeReplyid!=0){
-            				formmodeAuthorizeInfo = modeRightInfo.isFormModeAuthorize(formmodeflag, modeId, formmodebillId, fieldid, Util.getIntValue(docId), formModeReplyid,fMReplyFName);
-            			}else{
-            				formmodeAuthorizeInfo = modeRightInfo.isFormModeAuthorize(formmodeflag, modeId, formmodebillId, fieldid, Util.getIntValue(docId));
-            			}
-        		if("1".equals(formmodeAuthorizeInfo.get("AuthorizeFlag"))){//如果是表单建模的关联授权，那么直接有查看权限
-        			hasRight = true;
-        		}
-
+    		//表单建模判断关联授权
+    		String formmodeflag = StringHelper.null2String(req.getParameter("formmode_authorize"));
+    		Map<String,String> formmodeAuthorizeInfo = new HashMap<String,String>();
+    		//formmodeparas+="&formmode_authorize="+formmodeflag;
+    		if(formmodeflag.equals("formmode_authorize")){
+    			int modeId = 0;
+    			int formmodebillId = 0;
+    			int fieldid = 0;
+    			int formModeReplyid = 0;
+    			modeId = Util.getIntValue(req.getParameter("authorizemodeId"),0);
+    			formmodebillId = Util.getIntValue(req.getParameter("authorizeformmodebillId"),0);
+    			fieldid = Util.getIntValue(req.getParameter("authorizefieldid"),0);
+    			formModeReplyid = Util.getIntValue(req.getParameter("authorizeformModeReplyid"),0);
+    			String fMReplyFName = Util.null2String(req.getParameter("authorizefMReplyFName"));
+    			ModeRightInfo modeRightInfo = new ModeRightInfo();
+    			modeRightInfo.setUser(user);
+    			if(formModeReplyid!=0){
+    				formmodeAuthorizeInfo = modeRightInfo.isFormModeAuthorize(formmodeflag, modeId, formmodebillId, fieldid, Util.getIntValue(docId), formModeReplyid,fMReplyFName);
+    			}else{
+    				formmodeAuthorizeInfo = modeRightInfo.isFormModeAuthorize(formmodeflag, modeId, formmodebillId, fieldid, Util.getIntValue(docId));
+    			}
+    		}
+    		
+    		if("1".equals(formmodeAuthorizeInfo.get("AuthorizeFlag"))){//如果是表单建模的关联授权，那么直接有查看权限
+    			hasRight = true;
     		}
     	}
         return hasRight;
@@ -1783,15 +1640,9 @@ public class FileDownload extends HttpServlet {
           bouts=new BufferedOutputStream(outs); 
                response.setContentType("application/x-download");//设置response内容的类型 
                if((agent.contains("Firefox")||agent.contains(" Chrome")||agent.contains("Safari") )&& !agent.contains("Edge")){
-				   response.reset();
-                   response.resetBuffer();
-                   String headerValue = "attachment; filename=\""
-                           + new String(str.replaceAll("<", "")
-                           .replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", "").getBytes("UTF-8"),"ISO-8859-1") +"\";";
-                   response.setHeader("content-disposition",headerValue);
-                   //response.setHeader("content-disposition", "attachment; filename=\"" +  new String(str.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", "").getBytes("UTF-8"),"ISO-8859-1")+"\"");
+                   response.setHeader("content-disposition", "attachment; filename=\"" +  new String(str.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", "").getBytes("UTF-8"),"ISO-8859-1")+"\"");
                }else{
-                   response.setHeader("content-disposition", "attachment; filename=\"" + URLEncoder.encode(str.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", ""),"UTF-8").replaceAll("\\+", "%20").replaceAll("%28", "(").replaceAll("%29", ")")+"\"");
+                   response.setHeader("content-disposition", "attachment; filename=\"" + URLEncoder.encode(str.replaceAll("<", "").replaceAll(">", "").replaceAll("&lt;", "").replaceAll("&gt;", ""),"UTF-8").replaceAll("\\+", "%20")+"\"");
                }
                int bytesRead = 0; 
                byte[] buffer = new byte[8192]; 
@@ -1978,13 +1829,5 @@ public class FileDownload extends HttpServlet {
         }
         
         return isMsgObjToDocument;
-    }
-    
-    private boolean isOfficeToDocument(String extName){
-    	boolean isOfficeForToDocument=false;
-    	if("xls".equalsIgnoreCase(extName) || "doc".equalsIgnoreCase(extName)||"wps".equalsIgnoreCase(extName)||"ppt".equalsIgnoreCase(extName)||"docx".equalsIgnoreCase(extName)||"xlsx".equalsIgnoreCase(extName)||"pptx".equalsIgnoreCase(extName)){
-    		isOfficeForToDocument=true;
-    	}
-    	return isOfficeForToDocument;
     }
 }

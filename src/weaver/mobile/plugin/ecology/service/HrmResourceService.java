@@ -41,6 +41,9 @@ import weaver.systeminfo.SystemEnv;
 import weaver.wechat.util.WechatUtil;
 import weaver.workflow.workflow.WorkTypeComInfo;
 import weaver.workflow.request.todo.RequestUtil;
+import weaver.interfaces.sso.cas.CASRestAPI;
+import weaver.interfaces.sso.cas.CasSetting;
+import weaver.general.PasswordUtil;
 
 public class HrmResourceService extends BaseBean {
 	
@@ -52,16 +55,10 @@ public class HrmResourceService extends BaseBean {
 	public int getUserId(String loginId) {
 		try {
 			String sql = "";
-			
-			String mode=Prop.getPropValue(GCONST.getConfigFile() , "authentic");
-	    	if("ldap".equals(mode)){
-	    		//loginid、account字段整合 qc:128484
-	    		sql = "select id from HrmResource where loginid='" + loginId + "' and (accounttype is null  or accounttype=0 or accounttype=1) ";
-				//sql = "select id from HrmResource where account='" + loginId + "' and (accounttype is null  or accounttype=0) ";
-			} else {
-				sql = "select id from HrmResource where loginid='" + loginId + "' and (accounttype is null  or accounttype=0 or accounttype=1) ";
-			}
-			
+			//loginid、account字段整合 qc:128484
+				
+	    	sql = "select id from HrmResource where loginid='" + loginId + "' and (accounttype is null  or accounttype=0 or accounttype=1) and status in (0,1,2,3)";
+
 			sql += " union select id from HrmResourcemanager where loginid='" + loginId + "'";
 			RecordSet rs = new RecordSet();
 			rs.executeSql(sql);
@@ -77,11 +74,13 @@ public class HrmResourceService extends BaseBean {
 	public User getUserById(int userId) {
 		RecordSet rs = new RecordSet();
 		User user = null;
+		boolean isAdmin = false;
 		String sql = "select * from HrmResource where id=" + userId + "";
 		rs.executeSql(sql);
 		if(rs.getCounts()==0){
 			sql="select * from HrmResourceManager where id="+userId;
 			rs.executeSql(sql); 
+			isAdmin = rs.getCounts()>0;
 		}
 		if (rs.next()) {
 			user = new User();
@@ -124,6 +123,7 @@ public class HrmResourceService extends BaseBean {
 			user.setLogintype("1");
 			user.setAccount(rs.getString("account"));
 			user.setRemark(rs.getString("workcode"));//因User的Bean中无workcode字段，临时借用remark放置workcode编号字段
+			user.setIsAdmin(isAdmin);
 		}
 		return user;
 	}
@@ -222,6 +222,10 @@ public class HrmResourceService extends BaseBean {
 				
 				userMap.put("loginid", rs.getString("login_id"));
 				
+				userMap.put("seclevel",rs.getString("seclevel"));
+				
+				userMap.put("mobileshowtype",rs.getString("mobileshowtype"));
+				
 				userMap.put("showorder", rs.getString("dsporder"));
 				
 				String locationid = rs.getString("locationid");
@@ -280,6 +284,10 @@ public class HrmResourceService extends BaseBean {
 		
 		data.put("headerpic", Util.null2String(rci.getMessagerUrls(touser.getUID()+"")));
 		
+		data.put("seclevel", Util.null2String(touser.getSeclevel()));
+		
+		data.put("mobileshowtype", Util.null2String(rci.getMobile(touser.getUID()+"")));
+		
 		data.put("id", Util.null2String(touser.getUID()+""));
 		
 		data.put("email", Util.null2String(touser.getEmail()));
@@ -295,9 +303,13 @@ public class HrmResourceService extends BaseBean {
 			data.put("isadmin", "1");
 		}
 		
-		data.put("departmentid", rci.getDepartmentID(""+userId));
+		String departmentid = rci.getDepartmentID(""+userId);
+		data.put("departmentid", departmentid);
+		data.put("depids", dci.getAllSupDepartment(departmentid));
 		
-		data.put("subcompanyid", rci.getSubCompanyID(""+userId));
+		String subcompanyid = rci.getSubCompanyID(""+userId);
+		data.put("subcompanyid", subcompanyid);
+		data.put("subids", sci.getAllSupCompany(subcompanyid));
 		
 		return data;
 	}
@@ -308,37 +320,47 @@ public class HrmResourceService extends BaseBean {
 	 * 1:动态密码验证
 	 * 2:LDAP验证
 	 * 3:INI密码存储模式
-	 * 
+     * 1009：cas 集成
+	 *
 	 */
 	public int getLoginType(String loginId) {
-		String mode=Prop.getPropValue(GCONST.getConfigFile() , "authentic");
-    	if(mode!=null&&mode.equals("ldap")){
-    		 return 2;
-    	}
-    	
-    	HrmSettingsComInfo sci=new HrmSettingsComInfo();
-    	int needdynapass_sys = Util.getIntValue(sci.getNeeddynapass());
-    	if(needdynapass_sys==1) {
-    		return 1;
-    	}
-    	
-    	try {
-        	Class t = Class.forName("weaver.hrm.resource.UserSecComInfo");
-        	Object usci = t.newInstance();
-        	
-        	StaticObj staticobj = StaticObj.getInstance();
-        	List ids = ((List) staticobj.getRecordFromObj("UserSecInfo", "ids"));
-        	List loginids = ((List) staticobj.getRecordFromObj("UserSecInfo", "loginids"));
-        	List passwords = ((List) staticobj.getRecordFromObj("UserSecInfo", "passwords"));
 
-        	if(usci!=null && ids!=null && loginids!=null && passwords!=null) {
-        		return 3;
-        	}
-    	} catch(Exception e) {
-//    		e.printStackTrace();
-    	}
-    	
-		return 0;
+        //CAS集成
+        CasSetting cs = new CasSetting();
+
+        if(!"1".equals(cs.getIsuse()) || !"1".equals(cs.getAppauth())){//非CAS app 端集成
+            String mode=Prop.getPropValue(GCONST.getConfigFile() , "authentic");
+            if(mode!=null&&mode.equals("ldap")){
+                return 2;
+            }
+            HrmSettingsComInfo sci=new HrmSettingsComInfo();
+            int needdynapass_sys = Util.getIntValue(sci.getNeeddynapass());
+            if(needdynapass_sys==1) {
+                return 1;
+            }
+
+            try {
+                Class t = Class.forName("weaver.hrm.resource.UserSecComInfo");
+                Object usci = t.newInstance();
+
+                StaticObj staticobj = StaticObj.getInstance();
+                List ids = ((List) staticobj.getRecordFromObj("UserSecInfo", "ids"));
+                List loginids = ((List) staticobj.getRecordFromObj("UserSecInfo", "loginids"));
+                List passwords = ((List) staticobj.getRecordFromObj("UserSecInfo", "passwords"));
+
+                if(usci!=null && ids!=null && loginids!=null && passwords!=null) {
+                    return 3;
+                }
+            } catch(Exception e) {
+                //    		e.printStackTrace();
+            }
+        }else{//CAS集成
+        	writeLog("cas mobile in");
+            return 1009;
+        }
+
+
+        return 0;
 	}
 
 	
@@ -387,7 +409,9 @@ public class HrmResourceService extends BaseBean {
 			result = this.verifyLoginByLdap(loginId, password);
 		} else if(loginType==3) { //INI密码存储模式
 			result = this.verifyLoginByIni(loginId, password);
-		} else {
+		} else if(loginType==1009){ //CAS集成登录
+            result = verifyLoginByCAS(loginId, password);
+        } else {
 			// loginType == 0 默认数据库密码验证
 			result = verifyLoginByDb(loginId, password);
 		}
@@ -408,7 +432,57 @@ public class HrmResourceService extends BaseBean {
 		
 		return result;
 	}
-	
+
+    /**
+     * 根据移动端登录页面输入的登录名，获取loginid
+     * @param userName
+     * @return
+     * @throws Exception
+     */
+    public String getLoginIdByCAS(String userName) throws Exception {
+        String loginId = "";
+        CasSetting cs = new CasSetting();
+        String accountType = cs.getAccounttype();
+        RecordSet rs = new RecordSet();
+        if(!accountType.equals("7")){
+            rs.executeSql("select * from HrmResource where "+cs.getAccountKeys().get(accountType)+"='"+userName+"' and status<4");
+        }else{
+            rs.executeSql(cs.getCustomsql()+"'"+userName+"' ");
+        }
+        if(rs.next()){
+            loginId = rs.getString("loginid");
+        }
+        return loginId;
+    }
+    /**
+     * 手机版cas认证
+     * @param loginId
+     * @param password
+     * @return
+     */
+
+    private int verifyLoginByCAS(String loginId,String password){
+        try {
+            RecordSet rs = new RecordSet();
+            //判断是否为系统管理员登陆
+            String sql="select * from HrmResourcemanager where loginid='"+loginId+"'";
+            rs.execute(sql);
+            if(rs.next()){
+                return this.verifyLoginByDb(loginId, password);
+            }
+
+            String ticket = new CASRestAPI().getInstance().getTicket(loginId, password);
+            if(ticket!=null){
+                return 1;
+            }else{
+                return 2;
+            }
+        } catch(Exception e){//异常处理
+            writeLog(e);
+            return 5;
+        }
+    }
+
 	
 	private int verifyLoginByDynaForAD(String loginId, String password,String dynapass) {
 		
@@ -426,9 +500,9 @@ public class HrmResourceService extends BaseBean {
 	        if(result==1){
 	        	oaid = isADAccountAndOneLoginid(loginId);
 	        	if(!"".equals(oaid)){//OA中只存在一个AD账号，不进行大小写区分进行验证登录
-	        		sql = "select id,needdynapass,mobile from HrmResource where upper(loginid)='"+loginId.toUpperCase()+"' and id="+oaid+" and (accounttype is null  or accounttype=0)";
+	        		sql = "select id,needdynapass,mobile from HrmResource where upper(loginid)='"+loginId.toUpperCase()+"' and id="+oaid+" and (accounttype is null  or accounttype=0) and status in (0,1,2,3)";
 	        	}else{
-	        		sql = "select id,needdynapass,mobile from HrmResource where loginid='"+loginId+"' and (accounttype is null  or accounttype=0)";
+	        		sql = "select id,needdynapass,mobile from HrmResource where loginid='"+loginId+"' and (accounttype is null  or accounttype=0) and status in (0,1,2,3)";
 	        	}
 		        rs.executeSql(sql);
 		        if(rs.next()&&(Util.getIntValue(rs.getString("id"),0)>0)) {
@@ -526,6 +600,7 @@ public class HrmResourceService extends BaseBean {
 		RecordSet rs = new RecordSet();
 		RecordSet rs1 = new RecordSet();
 		String passwordTemp ="";
+		String salt ="";
 		String idTemp ="0";
 		String mobile = "";
 		String sql = "select id,mobile from HrmResource where loginid='"+loginId+"'";
@@ -541,13 +616,14 @@ public class HrmResourceService extends BaseBean {
         rs1.executeSql("select id from hrmpassword where id='"+idTemp+"'") ;
         if(rs1.next()) ;
         else rs1.executeSql("insert into hrmpassword(id,loginid) values("+idTemp+",'"+loginId+"')") ;
-        
-		sql = "select password from HrmResource where id = " + idTemp;
+        	
+		sql = "select password,salt from HrmResource where id = " + idTemp;
         rs.executeSql(sql);
         if (rs.next()) {
             passwordTemp = Util.null2String(rs.getString("password"));
+            salt = Util.null2String(rs.getString("salt"));
 			if(dynapass==null||"".equals(dynapass)) {
-	            if (passwordTemp.equals(Util.getEncrypt(password))) {
+	            if (PasswordUtil.check(password, passwordTemp, salt)) {
 	            	int dynapasslen = 4;
 	                if (dynapasslen > 0) {
 	                    SMSManager sm = new SMSManager();
@@ -582,7 +658,7 @@ public class HrmResourceService extends BaseBean {
 
 	private int verifyLoginByIni(String loginId,String password){
 		try {
-			String sql = "select id from HrmResource where loginid='" + loginId + "' and (accounttype is null  or accounttype=0) union select id from HrmResourcemanager where loginid='" + loginId + "'";
+			String sql = "select id from HrmResource where loginid='" + loginId + "' and (accounttype is null  or accounttype=0) and status in (0,1,2,3) union select id from HrmResourcemanager where loginid='" + loginId + "'";
 	        String idTemp = "0";
 			RecordSet rs = new RecordSet();
 			rs.executeSql(sql);
@@ -655,7 +731,7 @@ public class HrmResourceService extends BaseBean {
 		try {
 			RecordSet rs = new RecordSet();
 
-			String sql = "select tokenkey from HrmResource where loginid='" + loginid + "' and (accounttype is null  or accounttype=0)";
+			String sql = "select tokenkey from HrmResource where loginid='" + loginid + "' and (accounttype is null  or accounttype=0) and status in (0,1,2,3)";
 			String tokenkey = "";
 			rs.executeSql(sql);
 			if(rs.next()){
@@ -693,7 +769,6 @@ public class HrmResourceService extends BaseBean {
      * @return 对应ad 账号的oa id
      */
     private String isADAccountAndOneLoginid(String loginid){
-        System.out.println("~~~~"+loginid);
         String oaid = "";
         String countLoginidMatchCaseSql = "select isADAccount,id from hrmresource where isADAccount=1 and upper(loginid) = '"+ loginid.toUpperCase() +"'";
         RecordSet rs = new RecordSet();
@@ -777,12 +852,14 @@ public class HrmResourceService extends BaseBean {
 	private int verifyLoginByDb(String login_id,String user_password){
 		try {
 			RecordSet rs = new RecordSet();
-			String sql = "select id,password from HrmResource where loginid='" + login_id + "' and (accounttype is null  or accounttype=0) union select id,password from HrmResourcemanager where loginid='" + login_id + "'";
+			String sql = "select id,password,salt from HrmResource where loginid='" + login_id + "' and (accounttype is null  or accounttype=0) and status in (0,1,2,3) union select id,password,salt from HrmResourcemanager where loginid='" + login_id + "'";
 	        String passwordTemp = "";
+	        String salt = "";
 			rs.executeSql(sql);
 	        if(rs.next() && Util.getIntValue(rs.getString(1), 0) > 0) {
                 passwordTemp = Util.null2String(rs.getString(2));
-                if (passwordTemp.equals(Util.getEncrypt(user_password)))
+                salt = Util.null2String(rs.getString(3));
+                if (PasswordUtil.check(user_password, passwordTemp, salt))
                 	return 1;
                 else
                 	return 2;
@@ -812,7 +889,8 @@ public class HrmResourceService extends BaseBean {
 	        
 	        String idTemp ="0";
 	        String passwordTemp ="";
-	        sql = "select id,needdynapass,mobile from HrmResource where loginid='"+loginId+"' and (accounttype is null  or accounttype=0)";
+	        String salt ="";
+	        sql = "select id,needdynapass,mobile from HrmResource where loginid='"+loginId+"' and (accounttype is null  or accounttype=0) and status in (0,1,2,3)";
 	        rs.executeSql(sql);
 	        if(rs.next()&&(Util.getIntValue(rs.getString("id"),0)>0)) {
 	            idTemp = rs.getString("id");
@@ -830,19 +908,20 @@ public class HrmResourceService extends BaseBean {
 	            	if(rs1.next()) ;
 	            	else rs1.executeSql("insert into hrmpassword(id,loginid) values("+idTemp+",'"+loginId+"')") ;
 	            }
-	            sql = "select password from HrmResource where id = " + idTemp;
+	            sql = "select password,salt from HrmResource where id = " + idTemp;
 	            rs1.executeSql(sql);
 	            if (rs1.next()) {
 	                passwordTemp = Util.null2String(rs1.getString("password"));
+	                salt = Util.null2String(rs1.getString("salt"));
 	                if (needdynapass != 1) {
-	                    if (passwordTemp.equals(Util.getEncrypt(password)))
+	                    if (PasswordUtil.check(password, passwordTemp, salt))
 	                        return 1;
 	                    else 
 	                    	return 2;
 	                } else {
                     	if(dynapass==null||"".equals(dynapass)) {
                     		
-                            if (passwordTemp.equals(Util.getEncrypt(password))) {
+                            if (PasswordUtil.check(password, passwordTemp, salt)) {
                         		
                             	HrmSettingsComInfo sci=new HrmSettingsComInfo();
                             	int needdynapass_sys = Util.getIntValue(sci.getNeeddynapass());
@@ -1127,19 +1206,19 @@ public class HrmResourceService extends BaseBean {
 			// "authentic")) ? "account" : "loginid";
 			String loginid = "loginid";
 
-			String sql = "select id,lastname,pinyinlastname,messagerurl,subcompanyid1,departmentid,mobile,mobilecall,telephone,email,jobtitle,managerid,status,"
+			String sql = "select id,lastname,pinyinlastname,messagerurl,subcompanyid1,departmentid,mobile,mobilecall,telephone,email,jobtitle,managerid,belongto,status,seclevel,"
 					+ loginid
 					+ " as login_id,dsporder,locationid from hrmresource where (status = 0 or status = 1 or status = 2 or status = 3) and status != 10 ";
-			AppDetachComInfo adci = new AppDetachComInfo();
-			String sqlwhere = adci.getScopeSqlByHrmResourceSearch(user
-					.getUID()
-					+ "");
-			if (!("".equals(sqlwhere))) {
-				sql = "select id,lastname,pinyinlastname,messagerurl,subcompanyid1,departmentid,mobile,mobilecall,telephone,email,jobtitle,managerid,status,"
-						+ loginid
-						+ " as login_id,dsporder,locationid from hrmresource where (status = 0 or status = 1 or status = 2 or status = 3) and status != 10 and "
-						+ sqlwhere;
-			}
+//			AppDetachComInfo adci = new AppDetachComInfo();
+//			String sqlwhere = adci.getScopeSqlByHrmResourceSearch(user
+//					.getUID()
+//					+ "");
+//			if (!("".equals(sqlwhere))) {
+//				sql = "select id,lastname,pinyinlastname,messagerurl,subcompanyid1,departmentid,mobile,mobilecall,telephone,email,jobtitle,managerid,belongto,status,"
+//						+ loginid
+//						+ " as login_id,dsporder,locationid from hrmresource where (status = 0 or status = 1 or status = 2 or status = 3) and status != 10 and "
+//						+ sqlwhere;
+//			}
 			sql = sql
 					+ "  and subcompanyid1 is not null and subcompanyid1 !=0 and departmentid is not null and departmentid !=0  order by id";
 
@@ -1153,7 +1232,8 @@ public class HrmResourceService extends BaseBean {
 				userMap.put("Name", rs.getString("lastname"));
 				userMap.put("PYName", rs.getString("pinyinlastname"));
 				userMap.put("HeaderURL", rs.getString("messagerurl"));
-
+				userMap.put("seclevel", rs.getString("seclevel"));
+				userMap.put("mobileshowtype",rs.getString("mobileshowtype"));
 				String subcom = rs.getString("subcompanyid1");
 				userMap.put("SubCompanyID", subcom);
 				userMap
@@ -1197,7 +1277,7 @@ public class HrmResourceService extends BaseBean {
 				userMap
 						.put("locationName", lci
 								.getLocationname(locationid));
-
+				userMap.put("belongto", rs.getString("belongto"));
 				allUser.add(userMap);
 			}
 
@@ -1216,9 +1296,9 @@ public class HrmResourceService extends BaseBean {
 		RecordSet rs = new RecordSet();
 		AppDetachComInfo info = new AppDetachComInfo();
 		//判断是否开启人力资源分权
-		if (info.isUseAppDetach()) {
-			getAllUser(result, allUser, rs, user);
-		} else {
+//		if (info.isUseAppDetach()) {
+//			getAllUser(result, allUser, rs, user);
+//		} else {
 			Map<String, Object> ALL_USER_ = HrmResourceService.ALL_USER;
 			allUser = (List) ALL_USER_.get("users");
 			if (allUser == null || allUser.size() == 0) {
@@ -1239,23 +1319,6 @@ public class HrmResourceService extends BaseBean {
 				} else {
 					//如果当前时间与缓存相差5分钟以内读取缓存数据不查询数据库
 					if (now - synTime < 5L * 60L * 1000L) {
-						List allUserNew = new ArrayList();
-						HrmResourceMobileTools ht = new HrmResourceMobileTools();
-						List<String> showUserIds = ht.getMobileShowRight(user.getUID());
-						for (int i = 0; i < allUser.size(); i++) {
-							Map userMap =(Map) allUser.get(i);
-							Map userMapNew = getNewUser(userMap,new HashMap());
-							String uid = (String) userMapNew.get("ID");
-							if (!showUserIds.contains(uid)) {
-								String mobile = (String) userMapNew.get("mobile");
-								if (mobile.length() > 4) {
-									mobile = mobile.substring(0, mobile.length() - 4)+ "****";
-									userMapNew.put("mobile", mobile);
-								}
-							}
-							allUserNew.add(userMapNew);
-						}
-						result.put("data", allUserNew);
 						result.put("timestamp",ALL_USER_.get("timestamp"));
 					} else {
 						allUser = new ArrayList();
@@ -1267,11 +1330,31 @@ public class HrmResourceService extends BaseBean {
 				}
 			}
 
-		}
-
+//		}
+		List allUserNew = getAllUserNew(allUser,user);
+		result.put("data", allUserNew);
 		return result;
 	}
-
+	public List getAllUserNew(List allUser,User user){
+		List allUserNew = new ArrayList();
+		HrmResourceMobileTools ht = new HrmResourceMobileTools();
+		List<String> showUserIds = ht.getMobileShowRight(user.getUID());
+		for (int i = 0; i < allUser.size(); i++) {
+			Map userMap =(Map) allUser.get(i);
+			Map userMapNew = getNewUser(userMap,new HashMap());
+			String uid = (String) userMapNew.get("ID");
+			String userid = user.getUID()+"";
+			if (!showUserIds.contains(uid)&&!uid.equals(userid)) {
+				String mobile = (String) userMapNew.get("mobile");
+				if (mobile.length() > 4) {
+					mobile = mobile.substring(0, mobile.length() - 4)+ "****";
+					userMapNew.put("mobile", mobile);
+				}
+			}
+			allUserNew.add(userMapNew);
+		}
+		return allUserNew;
+	}
 	public Map getNewUser(Map userMapOld,Map userMapNew){
 		userMapNew.put("ID", userMapOld.get("ID"));
 		userMapNew.put("Name", userMapOld.get("Name"));
@@ -1283,6 +1366,8 @@ public class HrmResourceService extends BaseBean {
 		userMapNew.put("DepartmentName", userMapOld.get("DepartmentName"));
 		userMapNew.put("mobile", userMapOld.get("mobile"));
 		userMapNew.put("tel", userMapOld.get("tel"));
+		userMapNew.put("seclevel", userMapOld.get("seclevel"));
+		userMapNew.put("mobileshowtype",userMapOld.get("mobileshowtype"));
 		userMapNew.put("email", userMapOld.get("email"));
 		userMapNew.put("mobilecall", userMapOld.get("mobilecall"));
 		userMapNew.put("title", userMapOld.get("title"));
@@ -1293,6 +1378,7 @@ public class HrmResourceService extends BaseBean {
 		userMapNew.put("showorder", userMapOld.get("showorder"));
 		userMapNew.put("locationID", userMapOld.get("locationID"));
 		userMapNew.put("locationName", userMapOld.get("locationName"));
+		userMapNew.put("belongto", userMapOld.get("belongto"));
 		return userMapNew;
 	}
 
@@ -1307,10 +1393,10 @@ public class HrmResourceService extends BaseBean {
 			
 			String sql = "select * from HrmDepartment where canceled is null or canceled<>1 order by id";
 			rs.executeSql(sql);
-			AppDetachComInfo adci= new AppDetachComInfo();
+//			AppDetachComInfo adci= new AppDetachComInfo();
 			while(rs.next()) {
 				String ids = rs.getString("id"); //部门
-				if(adci.checkUserAppDetach(ids,"3",user)==0) continue;
+//				if(adci.checkUserAppDetach(ids,"3",user)==0) continue;
 				Map deptMap = new HashMap();
 				deptMap.put("ID", rs.getString("id"));
 				deptMap.put("Name", rs.getString("departmentname"));
@@ -1354,10 +1440,10 @@ public class HrmResourceService extends BaseBean {
 			
 			String sql = "select * from HrmSubCompany where canceled is null or canceled<>1 order by id";
 			rs.executeSql(sql);
-			AppDetachComInfo adci= new AppDetachComInfo();
+//			AppDetachComInfo adci= new AppDetachComInfo();
 			while(rs.next()) {
 				String ids = rs.getString("id"); //分部
-				if(adci.checkUserAppDetach(ids,"2",user)==0) continue;
+//				if(adci.checkUserAppDetach(ids,"2",user)==0) continue;
 				Map subcomMap = new HashMap();
 				subcomMap.put("ID", rs.getString("id"));
 				subcomMap.put("Name", rs.getString("subcompanyname"));
@@ -1532,19 +1618,22 @@ public class HrmResourceService extends BaseBean {
 				} else {
 					String sql = "select syncLastTime from mobileSyncInfo where syncTable='"+tbname+"'";
 					rs.executeSql(sql);
-					
+					Map tbl = new HashMap();
+					tbl.put("tablename", tbname);
+					tbl.put("hasSync", "1");
 					if(rs.next()) {
-						Map tbl = new HashMap();
-						tbl.put("tablename", tbname);
-						tbl.put("hasSync", "1");
+						
+
+
 						
 						long syncLastTime = NumberUtils.toLong(rs.getString("syncLastTime"));
 						if(syncLastTime > 0 && syncLastTime == tstamp) {
 							tbl.put("hasSync", "0");
 						}
 						
-						tblStatus.add(tbl);
+						
 					}
+					tblStatus.add(tbl);
 				}
 			}
 			
@@ -1782,10 +1871,8 @@ public class HrmResourceService extends BaseBean {
 			
 			while(scci.next()) {
 				if("1".equals(scci.getCompanyiscanceled()))continue;
-				
 				String supsubcomid = scci.getSupsubcomid();
-	            if("".equals(supsubcomid)) supsubcomid = "0";
-	            
+	            if("".equals(supsubcomid)) supsubcomid = "0";         
 				Map<String, String> node = new HashMap<String, String>();
 				node.put("id", scci.getSubCompanyid());
 				node.put("pId", supsubcomid);
@@ -1800,7 +1887,98 @@ public class HrmResourceService extends BaseBean {
 		
 		return result;
 	}
+
+	public Map<String, Object> getHrmSubCompanyTree(User user,String hasDepartment) {
+		Map<String, Object> result = new HashMap<String, Object>();
+		List<Map<String, String>> data = new ArrayList<Map<String, String>>();
+		
+		try {
+			CompanyComInfo cci = new CompanyComInfo();
+			SubCompanyComInfo scci = new SubCompanyComInfo();
+			
+			Map<String, String> root = new HashMap<String, String>();
+			String companyname = cci.getCompanyname("1");
+			root.put("id", "0");
+			root.put("pId", "-1");
+			root.put("name", companyname);
+			root.put("open", "true");
+			data.add(root);
+			
+			while(scci.next()) {
+				if("1".equals(scci.getCompanyiscanceled()))continue;
+				
+				String supsubcomid = scci.getSupsubcomid();
+	            if("".equals(supsubcomid)) supsubcomid = "0";
+	            
+				Map<String, String> node = new HashMap<String, String>();
+				node.put("id", scci.getSubCompanyid());
+				node.put("pId", supsubcomid);
+				node.put("name", scci.getSubCompanyname());
+				node.put("type", "0");
+				data.add(node);
+				int curid = Util.getIntValue(scci.getSubCompanyid(), 0);
+				if(curid>count){
+					count = curid;
+				}
+			}
+			List<Map<String, String>> data1 = new ArrayList<Map<String, String>>();
+			RecordSet rs = new RecordSet();
+			String sql = "select * from HrmDepartment where canceled is null or canceled<>1 order by id";
+			rs.executeSql(sql);
+			AppDetachComInfo adci= new AppDetachComInfo();
+			while(rs.next()) {
+				String ids = rs.getString("id");
+				if(adci.checkUserAppDetach(ids,"3",user)==0) continue;
+				Map<String, String> deptMap = new HashMap<String, String>();
+				deptMap.put("id", rs.getString("id"));
+				deptMap.put("name", rs.getString("departmentname"));
+				
+				int supdepid = rs.getInt("supdepid");
+				deptMap.put("pId", supdepid+"");
+				String subcompanyid = rs.getString("subcompanyid1");
+				deptMap.put("subcompanyid", subcompanyid);
+				deptMap.put("type", "1");
+				data1.add(deptMap);
+			}
+			addHrmDepartment(data,data1,"0",0);
+		} catch (Exception e) {
+			writeLog(e);
+		}
+		
+		result.put("data", data);
+		
+		return result;
+	}
 	
+	int count = 0;
+
+	public void addHrmDepartment(List<Map<String, String>> data,List<Map<String, String>> data1,String pid1,int newid){
+		for(Map<String, String> map : data1){
+			String pId = map.get("pId");
+			if(pid1.equals(pId)){
+				count++;
+				Map<String, String> node = new HashMap<String, String>();
+				String id = map.get("id");
+				String name = map.get("name");
+				String type = map.get("type");
+				node.put("id", count+"");
+				node.put("name", name);
+				node.put("type", type);
+				node.put("icon", "/images/manager/V50/subCopany_Colse_wev8.gif");
+				node.put("orgid", id);
+				String subcompanyid = map.get("subcompanyid");
+				node.put("subcompanyid", subcompanyid);
+				if("0".equals(pId)){
+					node.put("pId", subcompanyid);
+				} else {
+					node.put("pId", newid+"");
+				}
+				data.add(node);
+				addHrmDepartment(data,data1,id,count);
+			}
+		}
+	}
+
 	public boolean ifEqlTarget(String val, String target) {
     	if(val == null || val.equals("")) {
     		return false;
